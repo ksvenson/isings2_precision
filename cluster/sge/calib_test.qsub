@@ -1,0 +1,10 @@
+#!/bin/bash -l
+#$ -N calib_L128
+#$ -P qfe
+#$ -j y
+#$ -l h_rt=00:20:00
+#$ -o /projectnb/qfe/misra/IsingS2_precision/campaign_runs/calib_2026-08-23/calib.log
+cd /projectnb/qfe/misra/IsingS2_precision
+/usr/bin/time -v bin/ising_s2_crit --q 5 --n_refine 128 --l_max 8 \
+  --coupling_rule exact_sinh --data_dir campaign_runs/calib_2026-08-23 \
+  --n_therm 200 --n_traj 200 --n_skip 2 --seed 1
