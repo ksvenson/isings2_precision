@@ -4597,3 +4597,44 @@ convention is provenance-first. Worth putting `iters` in the cache key.
   (its interpreter isn't even executable in this checkout).
 - `scripts/rebin_jackblocks` -- a committed compiled x86-64 ELF binary;
   `rebin_jackblocks.c` and `.awk` remain, so nothing is lost.
+
+## 2026-10-04 (cont): cluster/build.sh now builds every driver, not just
+## ising_s2_crit
+
+`cluster/build.sh` built exactly one target (`ising_s2_crit`), and
+`CLAUDE.md` told you to "compile by hand with the same flags, see each
+file's header comment for its exact g++ invocation" for everything else --
+but **9 of the 16 `src/*.cc` files have no such header comment**,
+including `lean_harmonic_stats.cc`, the driver every current production
+job actually runs. So the documented path to building the workhorse did
+not exist, and a new user following CLAUDE.md could not submit a job.
+
+Verified first that all 16 targets compile with one identical flag set --
+there is nothing per-file about any of them -- then rewrote the script as
+a loop over a target list:
+
+```
+cluster/build.sh                      # 6 production drivers (default)
+cluster/build.sh --all                # + 10 diagnostics
+cluster/build.sh lean_harmonic_stats  # named target(s)
+cluster/build.sh --list
+```
+
+Default behaviour is a superset of the old script's (still builds
+`ising_s2_crit`), so nothing that called it before changes.
+
+Two portability fixes folded in: boost is loaded from the module system
+only when one is present (`type module`), falling back to a system-wide
+boost otherwise, and `-I "$SCC_BOOST_INCLUDE"` is omitted when that
+variable is unset. The same script now works unchanged on the SCC and
+off-cluster -- the off-cluster path is what this session used to build and
+validate the whole pipeline. Per-target build logs land in
+`bin/.<target>.buildlog` and are removed on success; a bad target name or
+a compile failure exits nonzero naming the target.
+
+CLAUDE.md's "Build" section rewritten to match, and corrected on two
+points: that the diagnostics are safe to re-run (verified: every `test_*`
+is pure stdout with zero file writes; `fem_scalar_test` touches only a
+mesh cache, `diag_optimize_integrator`/`dump_face_sa_range` only a path
+you pass them), and that a header edit does NOT trigger a rebuild since
+there is no dependency tracking.

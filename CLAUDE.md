@@ -71,22 +71,44 @@ re-copied into `include/`/`src/`/`grp/` here and logged in `journal.md`.
 ## Build
 
 ```
-cluster/build.sh
+cluster/build.sh                      # the 6 production drivers (default)
+cluster/build.sh --all                # production drivers + 10 diagnostics
+cluster/build.sh lean_harmonic_stats  # just the named target(s)
+cluster/build.sh --list               # show what each group contains
 ```
 
-Builds `src/ising_s2_crit.cc` into `bin/ising_s2_crit` (gitignored, rebuild
-after any change to that file). `module load boost/1.83.0` (for
-`boost/math/special_functions/spherical_harmonic`), Eigen vendored
-header-only at `include/Eigen` (no module needed), system `g++ 8.5.0` (no
-`module load gcc`), `-DGRP_DIR` pointed at this package's own `grp/`. The
-original `IsingS2/src/Makefile` is Homebrew/macOS-flavored and does not
-apply here.
+Output goes to `bin/` (gitignored; rebuild after any change to a driver or
+to a header it includes — there is no dependency tracking, so a header
+edit will NOT trigger a rebuild on its own).
 
-Other `src/*.cc` binaries (`lean_harmonic_stats`, `save_configs`,
-`full_corr_test`, `real_space_2pt_test`, `analyze_north_pole_configs`, and
-the ad hoc `test_*.cc` diagnostics) are not in `cluster/build.sh` — compile
-by hand with the same flags, see each file's header comment for its exact
-g++ invocation.
+Every target is a **single self-contained translation unit**: one
+`src/*.cc` that `#include`s the headers it needs. No object files to link,
+no library to build, no Makefile. Each target is one `g++` invocation with
+an identical flag set, which is why the script is just a loop. Never
+compile anything in `include/` directly.
+
+Boost (for `boost/math/special_functions/spherical_harmonic`) is the one
+non-vendored dependency: the script `module load boost/1.83.0`s it when a
+module system is present, and otherwise falls back to a system-wide boost,
+so the same script works on the SCC and on a plain Linux box (verified
+2026-10-04, all 16 targets). Eigen is vendored header-only at
+`include/Eigen` (no module needed); system `g++` (no `module load gcc`);
+`-DGRP_DIR` points at this package's own `grp/`. The original
+`IsingS2/src/Makefile` is Homebrew/macOS-flavored and does not apply here.
+
+Groups, as `--list` prints them:
+
+- **production** — `ising_s2_crit`, `lean_harmonic_stats`,
+  `real_space_2pt_test`, `save_configs`, `analyze_north_pole_configs`,
+  `full_corr_test`. Build these before submitting any cluster job;
+  `cluster/sge/*_task.sh` scripts `test -x` the one they need and fail
+  immediately if it is missing.
+- **diagnostics** — the `test_*` / `fem_scalar_test` /
+  `diag_optimize_integrator` / `dump_face_sa_range` one-offs. All are
+  read-only with respect to repo state (the only files any of them writes
+  are a mesh cache, or a path you pass on the command line), so they are
+  safe to re-run at any time; they are simply rarely needed. See each
+  file's header comment for what it checks and how to invoke it.
 
 ## Running the measurement driver
 
