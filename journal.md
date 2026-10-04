@@ -4671,3 +4671,76 @@ observation is specific to the icosahedral mesh family, not a general
 property of the method. Worth knowing if a q=4 cross-check is ever run as
 a control: its gate would have one fewer null level, and an l=2 signal
 there would be expected rather than alarming.
+
+## 2026-10-04 (cont): convention-free numerical proof of the l<=2 result;
+## job_progress.sh; quadrature-weight check
+
+**`scripts/verify_harmonic_rep_numerically.py`** -- independent
+confirmation of the previous entry's Schur argument that uses no
+character table, no Wigner D matrix, and no Y_lm phase convention, and
+reads the campaign's OWN group data (`grp/elem/o3q5.dat`, the same file
+the simulator reads). For each of the 60 proper icosahedral rotations it
+*discovers* the matrix `T(R)` acting on the `Y_lm` by least squares
+rather than asserting it, then checks the fit residual, unitarity, the
+representation property, and the commutant dimension. Results at 400
+sample points:
+
+```
+ l   max fit resid   max |TT^H - I|   max rep error   commutant dim
+ 0      2.8e-16         2.0e-15         1.0e-15             1   <- forced scalar
+ 1      3.6e-15         1.8e-15         1.6e-15             1   <- forced scalar
+ 2      8.0e-15         2.0e-15         1.2e-15             1   <- forced scalar
+ 3      1.3e-14         2.7e-15         1.3e-15             2
+ 4      1.9e-14         1.8e-15         1.3e-15             2
+ 5      2.5e-14         5.3e-15         3.2e-15             3
+ 6      3.2e-14         5.2e-15         4.5e-15             4
+ 7      3.9e-14         3.3e-15         2.3e-15             4
+ 8      4.6e-14         5.6e-15         3.7e-15             6
+```
+
+Every commutant dimension matches `sum_a n_a^2` from the character-table
+decomposition exactly (l=8's 6 = 1+1+2^2 from `T2 + G + 2H`). The
+`max fit resid` column is the one that matters conceptually: it *measures*
+rotation-invariance of `span{Y_lm}` at fixed l rather than assuming it --
+had the span not been closed, no `T` could fit and the residual would be
+O(1).
+
+**`cluster/sge/job_progress.sh`** -- `qstat` answers "what is the
+scheduler doing", which is usually not the question; this also counts
+shard files actually on disk per `(n_refine, mesh_mode)` against the
+expected shard count, and re-checks every shard for a ragged final line
+(the walltime-kill truncation of journal.md 2026-09-02). Tested against a
+synthetic tree including a deliberately truncated file.
+
+**Quadrature-weight check (throwaway, not committed)** -- measured what
+`UpdateWeights()` actually produces and what it buys, since the campaign
+has already been bitten once by a normalization bug in this area:
+
+- `sum_i w_i = n_sites` **exactly** (642.0000000000 at n_refine=8,
+  10242.0000000001 at 32), confirming CLAUDE.md's corrected statement and
+  *not* `4*pi`. So `w_i` is dimensionless with mean 1 -- a relative area
+  share, converted to a true solid angle by `*4*pi/n_sites`.
+- `w_i` spans a factor of ~1.8 (n_refine=8) to ~2.0 (32) between its
+  smallest and largest value, and that spread does NOT shrink with
+  refinement -- the mesh stays genuinely non-uniform, which is why a
+  weight is needed at all.
+- Discrete orthogonality `sum_i w_i (4pi/n_sites) Y_lm Y*_l'm'` vs the
+  same sum with the weights dropped:
+
+```
+  pair             weighted (k=8)  weighted (k=32)   UNweighted (k=8)  UNweighted (k=32)
+  (3,1)-(3,1)        -5.1e-03        -3.3e-04          -5.7e-02          -5.6e-02
+  (2,1)-(4,1)         5.0e-03         3.2e-04           5.6e-02           5.5e-02
+  (0,0)-(6,0)         8.1e-03         5.2e-04           9.1e-02           8.9e-02
+```
+
+With weights the error falls by ~16x from n_refine 8->32, i.e. **O(a^2)**,
+exactly as a convergent quadrature should. **Without weights it does not
+improve at all** (5.7e-2 -> 5.6e-2) -- the unweighted sum converges to the
+wrong answer, so the weights are not a refinement, they are what makes the
+projection converge in the first place.
+- Side observation, consistent with the group theory above: `(1,0)-(1,0)`,
+  `(2,0)-(2,0)` and `(1,0)-(3,0)` come out exact to machine precision even
+  UNWEIGHTED, while `(0,0)-(6,0)` does not -- the same icosahedral-
+  invariance pattern (low l protected, l=6 the first leak) showing up in
+  the quadrature rather than in `M_l`.
