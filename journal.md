@@ -4816,3 +4816,28 @@ production arrays would let the submit script return in seconds instead
 of blocking at all. Not adopted here because `-hold_jid` releases on
 prewarm *completion* regardless of exit status, so it would need the
 production task script to handle a missing cache safely first.
+
+## 2026-10-04 (cont): mesh-cache verification now checks exact file size
+
+The prewarm verification used `[[ -s "$f" ]]` -- "exists and non-empty".
+That is not enough. A prewarm task killed mid-`fwrite` (walltime limit,
+or a `qdel`) leaves a TRUNCATED cache file, which passes `-s` but is
+correctly rejected by `ReadPositions` at runtime as a cache miss -- at
+which point all 32 shards of that ladder point relax the mesh from cold
+simultaneously and race to rewrite the same file. That is exactly the
+failure the prewarm stage exists to prevent, surfacing in production
+instead of at submit time.
+
+`WritePositions` writes an int32 `n_sites` header plus `n_sites * Vec3`
+(3 doubles), so a complete q=5 cache is exactly
+
+    4 + 24*(10*n^2 + 2)  =  240*n^2 + 52  bytes
+
+verified against real cache files at n_refine=4/8/16 (3892 / 15412 /
+61492 bytes, exact). The submit script now checks that size per ladder
+point and refuses to submit production otherwise, naming the offending
+point and the byte delta. Tested by truncating a synthetic n_refine=768
+cache by 100 bytes out of 141 MB -- caught, production not submitted.
+
+Relevant immediately: the user is `qdel`-ing the first 768 submission's
+prewarm array mid-flight, which can leave exactly such a partial file.

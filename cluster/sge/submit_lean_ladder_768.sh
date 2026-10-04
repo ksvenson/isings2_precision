@@ -180,13 +180,33 @@ else
   echo "prewarm returned: $PREWARM_JOB"
 fi
 
+# Verify EXACT file size, not just non-emptiness. S2.h's WritePositions
+# writes an int32 n_sites header followed by n_sites * Vec3 (3 doubles),
+# so a complete cache for q=5 is exactly 4 + 24*(10*n^2+2) = 240*n^2 + 52
+# bytes (verified against real cache files at n_refine=4/8/16).
+#
+# This matters because a prewarm task killed mid-fwrite -- by a walltime
+# limit, or by a qdel -- leaves a TRUNCATED cache file. A `-s` test passes
+# it, but ReadPositions correctly rejects it at runtime as a cache miss,
+# at which point all 32 shards of that ladder point relax the mesh from
+# cold simultaneously and race to rewrite the same file. That is precisely
+# the failure the prewarm stage exists to prevent, so it must be caught
+# here rather than discovered in production.
 STEP_FMT=$(printf '%.3f' "$EQUAL_AREA_STEP")
 MISSING=0
 for n in "${LADDER[@]}"; do
   f="$MESH_CACHE_DIR/q5k${n}_eqarea_step${STEP_FMT}.dat"
-  if [[ ! -s "$f" ]]; then
-    echo "ERROR: missing/empty mesh cache for n_refine=$n ($f)" >&2
+  want=$((240 * n * n + 52))
+  if [[ ! -f "$f" ]]; then
+    echo "ERROR: missing mesh cache for n_refine=$n ($f)" >&2
     MISSING=1
+  else
+    got=$(stat -c%s "$f" 2>/dev/null || echo 0)
+    if [[ "$got" != "$want" ]]; then
+      echo "ERROR: TRUNCATED mesh cache for n_refine=$n: $got bytes, expected $want" >&2
+      echo "       ($f -- delete it and re-run the prewarm for this point)" >&2
+      MISSING=1
+    fi
   fi
 done
 if (( MISSING )); then
@@ -197,7 +217,7 @@ if (( MISSING )); then
   echo "       which would submit a second prewarm array racing the first." >&2
   exit 1
 fi
-echo "all $N_POINTS cache files verified present and non-empty"
+echo "all $N_POINTS cache files verified present and byte-complete"
 
 # ---------------------------------------------------------------
 # step 2: production arrays (4 total: {short,long} x {naive,eqarea})
