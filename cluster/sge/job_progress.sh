@@ -38,6 +38,44 @@ else
 fi
 echo "  states: qw=queued  r=running  Eqw=error  t/dr=transferring/deleting"
 
+# Prewarm runs BEFORE any shard file can exist, so without this section the
+# tool reports "no output yet" for hours and looks stuck. One cache file
+# appears per completed ladder point.
+echo
+echo "=== prewarm: equal_area mesh cache ==="
+if [[ -d "$OUT_ROOT/mesh_cache" ]]; then
+  shopt -s nullglob
+  cached=("$OUT_ROOT"/mesh_cache/*_eqarea_*.dat)
+  if ((${#cached[@]})); then
+    printf '%s\n' "${cached[@]}" \
+      | sed -E 's#.*/q5k([0-9]+)_eqarea_.*#\1#' | sort -n \
+      | while read -r n; do printf "    n_refine=%-5s cached\n" "$n"; done
+  fi
+  # still-missing points, if the ladder can be recovered from the manifest
+  if [[ -f "$OUT_ROOT/manifest.json" ]]; then
+    ladder=$(sed -nE 's/.*"ladder": \[([0-9, ]*)\].*/\1/p' "$OUT_ROOT/manifest.json" | tr -d ' ')
+    if [[ -n "$ladder" ]]; then
+      missing=()
+      IFS=',' read -r -a L <<<"$ladder"
+      for n in "${L[@]}"; do
+        [[ -s "$OUT_ROOT/mesh_cache/q5k${n}_eqarea_step0.300.dat" ]] || missing+=("$n")
+      done
+      echo "    ---"
+      echo "    cached ${#cached[@]}/${#L[@]} ladder points"
+      if ((${#missing[@]})); then
+        echo "    still relaxing: ${missing[*]}"
+      else
+        echo "    PREWARM COMPLETE -- production can be submitted"
+      fi
+    fi
+  fi
+  if ((${#cached[@]} == 0)); then
+    echo "    (no cache files yet -- the first relaxations are still running)"
+  fi
+else
+  echo "    (no mesh_cache/ dir)"
+fi
+
 echo
 echo "=== data on disk: $OUT_ROOT ==="
 shopt -s nullglob

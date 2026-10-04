@@ -1,0 +1,16 @@
+{
+  "campaign_id": "ising_s2_precision_lean_harmonic_stats",
+  "stage": "lean_ladder_768_2026-10-04",
+  "ladder": [4,6,8,12,16,24,32,48,64,96,128,192,256,384,512,768],
+  "ladder_short": "4:6:8:12:16:24:32:48:64:96:128", "ladder_long": "192:256:384:512:768",
+  "n_shards": 32, "l_max": 8, "coupling_rule": "exact_sinh",
+  "n_therm": 2000, "n_traj": 70000, "n_skip": 2,
+  "n_wolff": 5, "n_metropolis": 4,
+  "jack_block_size": 1000,
+  "mesh_modes_compared": ["naive", "equal_area"],
+  "equal_area_iters": 20000, "equal_area_step": 0.3,
+  "seed_base_naive": 920000, "seed_base_eqarea": 930000,
+  "h_rt_short": "12:00:00", "h_rt_long": "120:00:00", "pe_long": 4,
+  "simulator_sha256": "45574abb279e1e6e647f82ac92798694a8b2eca8be50b3fb34bc1243c45f8d3f",
+  "note": "extends lean_ladder_512_2026-08-27 by one rung to n_refine=768; identical stats/params so the new rung is directly comparable"
+}

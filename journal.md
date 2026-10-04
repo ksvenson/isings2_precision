@@ -4744,3 +4744,75 @@ projection converge in the first place.
   UNWEIGHTED, while `(0,0)-(6,0)` does not -- the same icosahedral-
   invariance pattern (low l protected, l=6 the first leak) showing up in
   the quadrature rather than in `M_l`.
+
+## 2026-10-04 (cont): measured the equal_area prewarm cost; added a
+## SKIP_PREWARM recovery path after `-sync y` blocked a live submission
+
+First real submission of `submit_lean_ladder_768.sh` (by the user, on
+SCC) sat in step 1 with 3/16 prewarm tasks running. Expected -- `qsub
+-sync y` blocks by design -- but it exposed a design miss: **`-sync y`
+was the wrong choice for THIS push.** Every earlier push topped out at
+n_refine<=128, where the equal_area relaxation is ~10 min, so blocking
+cost nothing. At n_refine=768 the relaxation is 36x the work of 128. The
+house prewarm pattern was copied from `submit_lean_ladder_512.sh` without
+re-deriving its cost at the new top rung.
+
+**Measured relaxation cost** (`EqualizeFaceAreas`, 20000-iter cap,
+step=0.3), locally, rather than extrapolating CLAUDE.md's note:
+
+```
+n_refine   wall      iters_used
+  16       0.26 s    (early stop, well under cap)
+  32       8.2 s     9908   (early stop)
+  48      37.0 s
+  64      68.5 s     20000  (hits cap)
+  96     157.5 s     20000
+```
+
+Two regimes. Below ~n=48 the rel_tol/patience early stop fires, so cost
+grows faster than n^2 (the iteration count is still rising). **From n=64
+up the cap is always hit, so iterations are constant and cost is clean
+n^2**: 157.5/68.5 = 2.30 vs (96/64)^2 = 2.25. An earlier read of the
+32-vs-64 numbers looked like n^3 -- that was the iteration count doubling
+across the early-stop boundary, not a real cubic.
+
+Extrapolating the capped regime and anchoring to CLAUDE.md's cluster
+datapoint (~30s at n=128 for 1000 iters => 600s for 20000, vs 274s
+locally, so the SCC core is ~2.2x slower here):
+
+```
+  n_refine    192     256     384     512     768
+  SCC prewarm  23m     40m    1.5h    2.7h    6.0h
+```
+
+So the prewarm array's long pole is ~6h, comfortably inside its
+`h_rt=24:00:00`. No walltime risk -- but ~6h is far too long to hold a
+bare login shell.
+
+**Fixes, all tested against a stubbed qsub and a synthetic tree:**
+
+1. `SKIP_PREWARM=1` skips the prewarm qsub but still runs the cache
+   verification (which was always the real gate, not the `-sync` return).
+   This is the recovery path if the submitting shell dies: the prewarm
+   array survives -- it belongs to SGE, not the shell -- but the
+   production arrays never get submitted. Re-running the script as-is
+   would submit a SECOND prewarm array racing the first on the same cache
+   files, the exact race the prewarm exists to prevent.
+2. **`OUT_ROOT_BASE` is now overridable.** This was a real bug in the
+   recovery path: the directory is stamped `$(date +%F)`, so a
+   SKIP_PREWARM re-run the next day -- the normal case, given a 6h
+   prewarm that can cross midnight -- would compute a fresh dated
+   directory, find an empty mesh_cache, and refuse.
+3. The manifest is no longer overwritten on a re-run; it is this push's
+   provenance record and a rerun's sha/timestamp would silently replace
+   the ones that actually produced the prewarmed meshes.
+4. `job_progress.sh` now reports prewarm progress (cached ladder points
+   vs. still relaxing, read from the manifest's own ladder). Without it
+   the tool says "no output yet" for six hours and looks stuck -- which
+   is exactly what the user saw.
+
+**Still open for a future push**: `-hold_jid <prewarm_jobid>` on the
+production arrays would let the submit script return in seconds instead
+of blocking at all. Not adopted here because `-hold_jid` releases on
+prewarm *completion* regardless of exit status, so it would need the
+production task script to handle a missing cache safely first.

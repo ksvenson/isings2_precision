@@ -90,7 +90,14 @@ H_RT_LONG=120:00:00
 H_RT_PREWARM=24:00:00
 PE_LONG=4
 
-OUT_ROOT_BASE="$ROOT/campaign_runs/lean_ladder_768_$(date +%F)"
+# Stamped with today's date by default. MUST be overridable, because the
+# SKIP_PREWARM recovery path is typically used a day or more after the
+# original submission (this ladder's prewarm runs for hours) -- without
+# the override, a recovery re-run would compute a NEW dated directory,
+# find an empty mesh_cache there, and refuse. Pass the original path:
+#   OUT_ROOT_BASE=.../campaign_runs/lean_ladder_768_2026-10-04 \
+#   SKIP_PREWARM=1 bash cluster/sge/submit_lean_ladder_768.sh
+OUT_ROOT_BASE="${OUT_ROOT_BASE:-$ROOT/campaign_runs/lean_ladder_768_$(date +%F)}"
 OUT_ROOT_NAIVE="$OUT_ROOT_BASE/naive"
 OUT_ROOT_EQAREA="$OUT_ROOT_BASE/eqarea"
 MESH_CACHE_DIR="$OUT_ROOT_BASE/mesh_cache"
@@ -100,7 +107,15 @@ mkdir -p "$OUT_ROOT_NAIVE" "$OUT_ROOT_EQAREA" "$MESH_CACHE_DIR" \
          "${OUT_ROOT_BASE}_naive_logs" "${OUT_ROOT_BASE}_eqarea_logs"
 
 SIM_SHA=$(sha256sum "$ROOT/bin/lean_harmonic_stats" | cut -d' ' -f1)
-cat > "$OUT_ROOT_BASE/manifest.json" <<EOF
+# A recovery re-run must not overwrite the original manifest -- that file is
+# this push's provenance record, and the rerun's timestamp/sha would silently
+# replace the ones that actually produced the prewarmed meshes.
+MANIFEST="$OUT_ROOT_BASE/manifest.json"
+if [[ -f "$MANIFEST" ]]; then
+  echo "keeping existing $MANIFEST (not overwriting on a re-run)"
+  MANIFEST=/dev/null
+fi
+cat > "$MANIFEST" <<EOF
 {
   "campaign_id": "ising_s2_precision_lean_harmonic_stats",
   "stage": "$(basename "$OUT_ROOT_BASE")",
@@ -118,7 +133,7 @@ cat > "$OUT_ROOT_BASE/manifest.json" <<EOF
   "note": "extends lean_ladder_512_2026-08-27 by one rung to n_refine=768; identical stats/params so the new rung is directly comparable"
 }
 EOF
-echo "wrote $OUT_ROOT_BASE/manifest.json"
+[[ "$MANIFEST" == /dev/null ]] || echo "wrote $MANIFEST"
 
 test -x "$ROOT/bin/lean_harmonic_stats" || { echo "ERROR: build bin/lean_harmonic_stats first" >&2; exit 1; }
 test -x "$ROOT/bin/ising_s2_crit"       || { echo "ERROR: run cluster/build.sh first" >&2; exit 1; }
@@ -133,13 +148,37 @@ test -x "$ROOT/bin/ising_s2_crit"       || { echo "ERROR: run cluster/build.sh f
 # step is that production must not start until it lands. Per that same
 # convention, the -sync y return is NOT trusted on its own -- the explicit
 # file check below is the real gate.
-echo "=== step 1: prewarm equal_area mesh cache ($N_POINTS points) ==="
-PREWARM_JOB=$(qsub -terse \
-  -P qfe -N s2prec_lean_ladder_768_prewarm -j y -o "$OUT_ROOT_BASE/" \
-  -sync y -t "1-$N_POINTS" -l h_rt=$H_RT_PREWARM -pe omp $PE_LONG \
-  -v ROOT="$ROOT",LADDER_CSV="$LADDER_ALL",L_MAX="$L_MAX",EQUAL_AREA_ITERS="$EQUAL_AREA_ITERS",EQUAL_AREA_STEP="$EQUAL_AREA_STEP",MESH_CACHE_DIR="$MESH_CACHE_DIR",MESH_MODE=equal_area \
-  "$ROOT/cluster/sge/prewarm_mesh_cache_task.sh")
-echo "prewarm returned: $PREWARM_JOB"
+# RECOVERY PATH -- set SKIP_PREWARM=1 to jump straight to step 2.
+#
+# `-sync y` blocks this script until the whole prewarm array finishes,
+# which at this ladder's top rung is HOURS (the n_refine=768 relaxation is
+# 144x the work of n_refine=64; measured 2026-10-04). If the login session
+# running this script dies in the meantime, the prewarm array survives --
+# it belongs to SGE, not to your shell -- but the production arrays never
+# get submitted, because the script that submits them is gone.
+#
+# Do NOT just re-run this script in that situation: it would submit a
+# SECOND prewarm array racing the first one on the same cache files, which
+# is the exact race the prewarm exists to prevent. Instead, once the
+# original prewarm array has finished, re-run with:
+#
+#     SKIP_PREWARM=1 bash cluster/sge/submit_lean_ladder_768.sh
+#
+# which skips the qsub but still runs the cache verification below -- that
+# check, not the -sync return, was always the real gate.
+if [[ "${SKIP_PREWARM:-0}" == "1" ]]; then
+  echo "=== step 1: SKIPPED (SKIP_PREWARM=1) -- verifying existing cache ==="
+else
+  echo "=== step 1: prewarm equal_area mesh cache ($N_POINTS points) ==="
+  echo "    NOTE: this blocks for hours at this ladder's top rung. If this"
+  echo "    shell may not survive that, see SKIP_PREWARM in this script."
+  PREWARM_JOB=$(qsub -terse \
+    -P qfe -N s2prec_lean_ladder_768_prewarm -j y -o "$OUT_ROOT_BASE/" \
+    -sync y -t "1-$N_POINTS" -l h_rt=$H_RT_PREWARM -pe omp $PE_LONG \
+    -v ROOT="$ROOT",LADDER_CSV="$LADDER_ALL",L_MAX="$L_MAX",EQUAL_AREA_ITERS="$EQUAL_AREA_ITERS",EQUAL_AREA_STEP="$EQUAL_AREA_STEP",MESH_CACHE_DIR="$MESH_CACHE_DIR",MESH_MODE=equal_area \
+    "$ROOT/cluster/sge/prewarm_mesh_cache_task.sh")
+  echo "prewarm returned: $PREWARM_JOB"
+fi
 
 STEP_FMT=$(printf '%.3f' "$EQUAL_AREA_STEP")
 MISSING=0
@@ -152,7 +191,10 @@ for n in "${LADDER[@]}"; do
 done
 if (( MISSING )); then
   echo "ERROR: prewarm incomplete -- NOT submitting production." >&2
-  echo "       Inspect $OUT_ROOT_BASE/s2prec_lean_ladder_768_prewarm.o* and rerun." >&2
+  echo "       Inspect $OUT_ROOT_BASE/s2prec_lean_ladder_768_prewarm.o* ." >&2
+  echo "       If the prewarm array is still running, wait for it and then use" >&2
+  echo "       SKIP_PREWARM=1 bash \$0  -- do NOT re-run this script as-is," >&2
+  echo "       which would submit a second prewarm array racing the first." >&2
   exit 1
 fi
 echo "all $N_POINTS cache files verified present and non-empty"
