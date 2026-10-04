@@ -4522,3 +4522,78 @@ Also added a `.gitignore` (`bin/`, `.venv_plot/`, `__pycache__/`,
 `campaign_runs/**/*.dat`, `core.*`) since the copied checkout had none,
 and untracked 19 stale `.pyc` files (cpython-36/310) that had been
 committed.
+
+## 2026-10-04 (cont): group-theory result -- l<=2 CANNOT show kappa2_r
+## breaking, so half the step-6 gate is vacuous; plus stale-file cleanup
+
+**New analytical result, `scripts/icosahedral_harmonic_decomposition.py`**
+(committed as a script per directive.md's "derive it, don't quote it from
+memory" rule; the character table is checked for orthonormality at runtime
+so a typo can't propagate silently).
+
+A q=5 mesh is exactly icosahedrally symmetric -- machine precision for
+`naive` and `equal_area`. The action, quadrature weights and MC measure
+all inherit that symmetry, so `M_l[m,m']` commutes with the
+representation of the icosahedral group `I` on the (2l+1)-dim Y_lm space.
+By Schur, `M_l` is a scalar on each irreducible component, so it has at
+most as many distinct eigenvalues as there are inequivalent irreps in the
+restriction. Decomposing:
+
+```
+l=1  (dim 3)  = T1          -> ONE irrep -> M_1 = c*Identity exactly
+l=2  (dim 5)  = H           -> ONE irrep -> M_2 = c*Identity exactly
+l=3  (dim 7)  = T2 + G      -> two irreps -> kappa2_r may be nonzero
+l=4  (dim 9)  = G + H       -> two irreps
+l=6  (dim 13) = A + T1 + G + H   (first l>0 containing the trivial rep)
+```
+
+**Therefore kappa2_r, kappa3_r and kappa4_r vanish IDENTICALLY at l=1 and
+l=2, at any mesh resolution, however coarse.** Those two levels are not
+capable of showing SO(3) breaking in this observable.
+
+**Consequence: the "l<=2 clean, l>=3 plateau" split that this campaign has
+reported since the 2026-08-24 gate evaluation is not a physical boundary.**
+The two levels that pass PLAN.md step 6 are exactly the two that cannot
+fail it, and l=3 is simply the first level where a nonzero kappa2_r is
+kinematically allowed at all. Every measured l=1,2 value (9.5e-6 / 8.4e-6
+at n_refine=512, "consistent with zero") is pure MC noise around an exact
+zero, as it must be -- it is a useful null test of the pipeline, but it is
+NOT evidence that symmetry is restored at low l.
+
+**What this does NOT explain**: why the l>=3 plateau fails to *shrink*
+under refinement. Icosahedral symmetry is exact at every n_refine, so this
+argument constrains *which* l can break SO(3), not how fast the breaking
+dies away. The open question is unchanged; its framing is not.
+
+**Validation**: the same computation reproduces, analytically, the l=6
+fact the campaign previously found only empirically via the deterministic
+free-scalar FEM run (`src/fem_scalar_test.cc`, journal 2026-08-25) -- l=6
+is the first l>0 whose restriction contains the trivial rep A, and the
+script's invariant levels (6, 10, 12, ...) match PLAN.md's empirically
+noted "l=6, 10, 12, 15, ..." exactly. That agreement is the cross-check
+that the character table and decomposition are right.
+
+**Latent hazard found while auditing the mesh cache**: `ReadPositions`
+validates ONLY the `n_sites` header, and the cache filename
+(`q5k<n>[_eqarea|_eqrp]_step<%.3f>.dat`) records the step size but **not
+`--equal_area_iters`**. A cache written by a push using 1000 iterations is
+therefore silently accepted by a later push asking for 20000 -- same
+n_sites, same step, different relaxation state, no warning. Not hit in
+practice (every current submit script prewarms its own job-local cache),
+but it is a real silent-provenance hole in a repo whose whole SGE
+convention is provenance-first. Worth putting `iters` in the cache key.
+
+**Stale files deleted** (per user direction):
+- `mesh_cache/q5k{2,3,4,6,8,12,16,24,32,48,64,96,128}_step0.300.dat` (13
+  files) -- `equal_area` caches written by `submit_push7_dual.sh` under
+  the OLD naming, before the `_eqarea`/`_eqrp` suffix was added. Current
+  code looks for `q5k<n>_eqarea_step0.300.dat`, so these were unreachable
+  dead weight. Deliberately NOT renamed into the new scheme: given the
+  iters hole above, silently reviving a 6-week-old cache of uncertain
+  relaxation provenance is exactly the wrong move, and regenerating is
+  ~30s at n_refine=128. The 7 `_eqrp` files are still reachable under
+  current naming and were left alone.
+- `grp/.venv/` -- a committed Python 3.6 virtualenv, non-functional here
+  (its interpreter isn't even executable in this checkout).
+- `scripts/rebin_jackblocks` -- a committed compiled x86-64 ELF binary;
+  `rebin_jackblocks.c` and `.awk` remain, so nothing is lost.
