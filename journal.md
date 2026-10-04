@@ -4638,3 +4638,36 @@ is pure stdout with zero file writes; `fem_scalar_test` touches only a
 mesh cache, `diag_optimize_integrator`/`dump_face_sa_range` only a path
 you pass them), and that a header edit does NOT trigger a rebuild since
 there is no dependency tracking.
+
+## 2026-10-04 (cont): commutant cross-check added, and the q=3/4/5
+## comparison -- why the icosahedron buys an extra clean harmonic level
+
+Extended `scripts/icosahedral_harmonic_decomposition.py` with a second,
+**character-table-free** computation of the same result, as a guard
+against the stored table being subtly wrong. The commutant of the spin-l
+rep -- the space of all operators commuting with every group element,
+which is exactly where `M_l` is forced to live -- has dimension
+`sum_a n_a^2 = (1/|G|) sum_g |chi_l(g)|^2`, needing only the group's class
+sizes and rotation angles. `M_l` is forced proportional to the identity
+iff that dimension is 1. The script now asserts this agrees with the
+character-table decomposition for every l, and it does.
+
+Also added the `q` comparison, which answers "why q=5" quantitatively:
+
+```
+ q  group                |G|   first l where kappa2_r is symmetry-allowed
+ 3  T  (tetrahedron)      12   l = 2
+ 4  O  (octahedron)       24   l = 2
+ 5  I  (icosahedron)      60   l = 3
+```
+
+The icosahedral group is the largest of the three admissible base
+polyhedra (`S2.h`: q=3/4/5 = tetrahedron/octahedron/icosahedron), so it
+keeps the harmonics degenerate longest: q=5 forces BOTH l=1 and l=2 to be
+exactly scalar, where q=4 and q=3 force only l=1. Concretely, on an
+octahedral mesh `l=2` would already split (into E + T2) and would show a
+nonzero kappa2_r plateau of its own -- so the campaign's "l=1,2 clean"
+observation is specific to the icosahedral mesh family, not a general
+property of the method. Worth knowing if a q=4 cross-check is ever run as
+a control: its gate would have one fewer null level, and an l=2 signal
+there would be expected rather than alarming.

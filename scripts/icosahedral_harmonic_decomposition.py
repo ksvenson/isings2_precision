@@ -109,6 +109,50 @@ def decompose(l):
     return out
 
 
+
+# ---------------------------------------------------------------------
+# Independent cross-check, and the q=3/4/5 comparison.
+#
+# The commutant of a representation -- the space of ALL operators that
+# commute with every group element, which is exactly where M_l is forced
+# to live -- has dimension sum_a n_a^2 over the irrep multiplicities n_a,
+# and equals (1/|G|) sum_g |chi(g)|^2. That needs only the group's class
+# sizes and rotation angles: NO character table. So it is a genuinely
+# independent check on the decomposition above.
+#
+# M_l is forced proportional to the identity  <=>  commutant dimension 1
+# (one irrep, multiplicity one). That is the whole criterion.
+#
+# Rotation groups of the three valid base polyhedra (S2.h: q = 3, 4, 5 for
+# tetrahedron, octahedron, icosahedron). Each entry is (class size,
+# rotation angle in degrees).
+# ---------------------------------------------------------------------
+ROTATION_GROUPS = {
+    3: ("T  (tetrahedron)", [(1, 0.0), (4, 120.0), (4, 240.0), (3, 180.0)]),
+    4: ("O  (octahedron)",  [(1, 0.0), (6, 90.0), (3, 180.0), (8, 120.0), (6, 180.0)]),
+    5: ("I  (icosahedron)", [(1, 0.0), (12, 72.0), (12, 144.0), (20, 120.0), (15, 180.0)]),
+}
+
+
+def commutant_dim(q, l):
+    """dim of the algebra of operators commuting with the whole group on
+    the (2l+1)-dim spin-l space = sum_a n_a^2. Character table not used."""
+    _, classes = ROTATION_GROUPS[q]
+    order = sum(size for size, _ in classes)
+    total = sum(size * so3_character(l, np.deg2rad(ang)) ** 2 for size, ang in classes)
+    val = total / order
+    n = int(round(val))
+    assert abs(val - n) < 1e-9, f"q={q} l={l}: non-integer commutant dim {val}"
+    return n
+
+
+def first_breaking_l(q, l_max=24):
+    for l in range(1, l_max + 1):
+        if commutant_dim(q, l) > 1:
+            return l
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -139,8 +183,30 @@ def main():
 
     first = next(l for l in range(1, args.l_max + 1) if len(decompose(l)) > 1)
     print(f"\nFirst l at which a nonzero kappa2_r is symmetry-allowed: l = {first}")
-    print("Levels l=1,2 cannot show SO(3) breaking in this observable at all --")
-    print("their 'passing' the PLAN.md step-6 gate carries no information.")
+
+    # Independent check of that number via the commutant dimension, which
+    # uses only class sizes/angles -- no character table, so a typo in
+    # CHARACTERS cannot produce an agreeing answer by accident.
+    for l in range(args.l_max + 1):
+        from_table = sum(n * n for n in decompose(l).values())
+        assert commutant_dim(5, l) == from_table, f"l={l}: commutant mismatch"
+    print(f"cross-check: commutant dims agree with the character table for all "
+          f"l<={args.l_max} (computed without it)")
+
+    print("\nWhy q=5. The base polyhedron (S2.h: q=3/4/5 = tetrahedron/"
+          "octahedron/icosahedron)\nfixes the residual symmetry group, and so "
+          "fixes the first l that can break SO(3):\n")
+    print(f"  {'q':>2}  {'group':<20} {'|G|':>4}  {'first l with kappa2_r allowed':<30}")
+    print("  " + "-" * 62)
+    for q in (3, 4, 5):
+        name, classes = ROTATION_GROUPS[q]
+        order = sum(sz for sz, _ in classes)
+        print(f"  {q:>2}  {name:<20} {order:>4}  l = {first_breaking_l(q)}")
+    print("\nThe icosahedral group is the largest of the three, so it keeps the")
+    print("harmonics degenerate longest: q=5 forces BOTH l=1 and l=2 to be exactly")
+    print("scalar, where q=4 and q=3 force only l=1. That extra clean level is one")
+    print("reason this campaign uses q=5 -- and it is also why its first usable")
+    print("symmetry signal sits at l=3 rather than l=2.")
 
 
 if __name__ == "__main__":
