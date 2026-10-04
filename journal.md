@@ -4426,3 +4426,99 @@ campaign has built (n_refine=512, ~2.6M sites) and across all three mesh
 modes tried (naive, equal_area, equal_rp) at up to n_refine=128. No mesh
 smoother tried so far eliminates the l>=3 signal or makes it shrink with
 resolution -- it remains an open, unexplained finding.
+
+## 2026-10-04 (new session, new machine) -- repo copied off the cluster
+## into a standalone checkout; environment rebuilt from scratch; pipeline
+## re-validated end to end; n_refine=768 ladder prepared
+
+New user, new working copy. This checkout was copied out of the original
+cluster project directory and is **missing every gitignored/bulk
+artifact**: no `bin/`, no `.venv_plot/`, no `campaign_runs/` (so no
+production data and none of the plots any prior entry refers to), and no
+`.gitignore` itself. No `qsub`/`qstat`/`qacct`, no `module`, no
+`/projectnb` -- this session had no cluster access at all, so nothing
+below was run on SCC.
+
+**Environment rebuilt and verified on a plain Linux box** (useful as a
+record that the package really is self-contained, per the 2026-08-22
+entry):
+
+- `boost` from the distro (`libboost-math-dev`) rather than
+  `module load boost/1.83.0`; Eigen already vendored.
+- Both drivers compile clean with the `cluster/build.sh` flag set, minus
+  the SCC-specific `-I$SCC_BOOST_INCLUDE`:
+  `g++ -g -O3 -fopenmp -Wall -Wno-deprecated-declarations
+  -Wno-sign-compare -I include -I include/unsupported
+  -DGRP_DIR='"<root>/grp"' src/<driver>.cc -o bin/<driver>`
+  (warnings are all pre-existing `fscanf` `warn_unused_result` noise from
+  `lattice.h`).
+- `.venv_plot` recreated: `python3 -m venv .venv_plot` +
+  `pip install numpy scipy matplotlib sympy`. Note the original venv was
+  Python 3.10; this one is 3.11 and every analysis script ran unmodified.
+
+**Full `mesh_compare_kappa2_r_vs_invL.png` pipeline re-validated end to
+end** on a deliberately tiny local ladder (`campaign_runs/
+local_smoke_2026-10-04/`, naive+eqarea, n_refine={4,6,8,12,16}, 4
+shards x 40000 traj -- 80k measurements/point vs. production's 1.1M).
+Mechanism confirmed: `lean_harmonic_stats` -> `symmetry_check_lean_kappa2.
+point_kappa2` -> `symmetry_test.analyze_blocks` -> `plot_mesh_compare_full.
+py` produces all six figures including the target filename. **The numbers
+in that smoke run are noise, not physics** -- kappa2_r ~1e-4 flat across
+every l with naive/eqarea indistinguishable, exactly as expected at 1/14th
+the statistics and 1/32nd the top resolution. Raw `.dat` deleted after
+plotting (175MB); the plots are kept as the record.
+
+**Real fix, not just setup: hardened `analyze_lean_harmonic_stats.load()`
+against a field-boundary-truncated final block.** This is the "not yet
+done" TODO carried since 2026-08-27 and the thing that forced the manual
+`sed -i '$d'` on 3 eqarea shards in the 2026-09-02 entry. The existing
+`try/except ValueError -> break` only catches a tear *mid-token*; a
+walltime kill that cuts `fprintf` at a field boundary yields a line of
+859/851/763 clean floats instead of 975, parses without raising, and
+appends a short block whose missing `(l,m,mp)` entries surface much later
+as a `KeyError` in `to_analyze_blocks_format`. Now the line width is
+checked explicitly against `6 + n_lm + 2*n_offdiag` and a short final
+block is dropped with a warning. Reproduced the exact 975->859 failure on
+a smoke shard and confirmed the fix drops one block (200 -> 199) and
+converts cleanly.
+
+**Prepared `cluster/sge/submit_lean_ladder_768.sh`** (copied from
+`submit_lean_ladder_512.sh` per the "copy, don't edit in place"
+convention). Extends the ladder one rung to n_refine=768 (5,898,242
+sites, 2.25x the sites of 512) with **every statistics/physics parameter
+held identical to the 512 push** -- l_max=8, exact_sinh, n_traj=70000,
+n_skip=2, n_wolff=5, n_metropolis=4, jack_block_size=1000, 32 shards --
+so the new rung is comparable to the existing ladder rather than
+confounded. Four deliberate infrastructure changes, each tied to a
+documented failure:
+
+1. **Production split into a short-rung and a long-rung array** (4..128
+   at `h_rt=12:00:00`, 192..768 at `h_rt=120:00:00`) instead of one array
+   under a single h_rt. The 512 push ran everything at `h_rt=30:00:00`
+   and lost 19 eqarea tasks to walltime kills, all at its top rung.
+2. **`h_rt=120:00:00` on the long array.** Cost model calibrated against
+   this campaign's own ~9.4ms/measurement at n_refine=32 scaling linearly
+   in n_sites (which correctly predicted 512's ~24h) puts 768 at ~53h/
+   shard; 512's kills show that model runs optimistic, hence the margin.
+3. **`-pe omp 4` on the long and prewarm arrays, purely for SCC per-core
+   memory** (same rationale as `submit_gd_stress_1024.sh`). Measured here:
+   1.96 kB/site for `lean_harmonic_stats`, 1.48 kB/site for
+   `ising_s2_crit`, i.e. ~11.6GB and ~8.7GB at n_refine=768 -- past a
+   default slot, which is why 512 (~5.1GB) got away without a reservation.
+4. **Seed bases 920000/921000/930000/931000**, disjoint per arm and from
+   the 512 push's 900000/910000.
+
+Prewarm keeps the `-sync y` + independent-file-verification pattern (the
+`-sync y` ban in CLAUDE.md is about *production* arrays, and the explicit
+check, not the sync's return, is the real gate). `LADDER_SHORT=""
+LADDER_LONG="768"` runs only the new rung if the 512 data is reachable.
+**Dry-ran the whole script against a stubbed `qsub`**: normal path, the
+only-new-rung override, the prewarm-failure abort (correctly never
+reaches step 2), and the task-index -> (n_refine, shard, seed) layout for
+the long arm all verified. **Not submitted** -- no cluster access from
+this session.
+
+Also added a `.gitignore` (`bin/`, `.venv_plot/`, `__pycache__/`,
+`campaign_runs/**/*.dat`, `core.*`) since the copied checkout had none,
+and untracked 19 stale `.pyc` files (cpython-36/310) that had been
+committed.

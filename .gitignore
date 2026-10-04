@@ -1,0 +1,23 @@
+# Build output -- rebuild with cluster/build.sh (ising_s2_crit) or the
+# per-file g++ line in each other src/*.cc header comment.
+bin/
+
+# Local Python environment (see CLAUDE.md "Python environment"); recreate
+# with: python3 -m venv .venv_plot && .venv_plot/bin/pip install numpy scipy matplotlib sympy
+.venv_plot/
+__pycache__/
+*.pyc
+
+# Production MC output. Raw shard/jackblock data is far too large for git
+# (a single ladder point is O(100MB-GB)) and lives on the cluster's
+# project filesystem. Plots and manifests ARE tracked -- they are the
+# small, reviewable record of what a push produced.
+campaign_runs/**/*.dat
+campaign_runs/**/*.pkl
+campaign_runs/**/*.o[0-9]*
+campaign_runs/**/mesh_cache/
+
+# Core dumps from crashed runs. These are crash artifacts, NOT data or
+# caches -- safe to delete, and they can be multi-GB each.
+core
+core.[0-9]*

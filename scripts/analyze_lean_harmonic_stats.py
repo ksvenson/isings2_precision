@@ -59,6 +59,19 @@ def load(path):
                 # repeatedly reading eqarea/eqrp dirs while job 7341060 was
                 # still writing, 2026-08-28).
                 break
+            # A walltime kill can also cut the line at a *field* boundary,
+            # which parses cleanly as floats and so slips past the except
+            # above -- the resulting short block then surfaces much later
+            # as a KeyError on whichever (l,m,mp) fell past the cut (hit on
+            # 3 of the n_refine=512 eqarea shards, journal.md 2026-09-02,
+            # where the fix was a manual `sed -i '$d'`). Check the width
+            # explicitly instead: 1 block_index + 1 n_meas + 4 M-moments +
+            # n_lm diagonal + 2*n_offdiag (re then im).
+            n_expected = 6 + n_lm + (2 * len(offdiag_list) if offdiag_list is not None else 0)
+            if len(p) != n_expected:
+                print(f"warning: {path}: dropping truncated final block "
+                      f"({len(p)} fields, expected {n_expected})", file=sys.stderr)
+                break
             abs2 = np.array(rest[:n_lm])
             blk = dict(n=n_meas, M=M_sum, M2=M2_sum, M3=M3_sum, M4=M4_sum, abs2=abs2)
             if offdiag_list is not None:
