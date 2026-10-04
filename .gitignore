@@ -21,3 +21,6 @@ campaign_runs/**/mesh_cache/
 # caches -- safe to delete, and they can be multi-GB each.
 core
 core.[0-9]*
+
+# Submission/driver logs kept next to a run for convenience.
+*.log
