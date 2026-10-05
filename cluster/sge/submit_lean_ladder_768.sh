@@ -90,14 +90,32 @@ H_RT_LONG=120:00:00
 H_RT_PREWARM=24:00:00
 PE_LONG=4
 
-# Stamped with today's date by default. MUST be overridable, because the
-# SKIP_PREWARM recovery path is typically used a day or more after the
-# original submission (this ladder's prewarm runs for hours) -- without
-# the override, a recovery re-run would compute a NEW dated directory,
-# find an empty mesh_cache there, and refuse. Pass the original path:
-#   OUT_ROOT_BASE=.../campaign_runs/lean_ladder_768_2026-10-04 \
-#   SKIP_PREWARM=1 bash cluster/sge/submit_lean_ladder_768.sh
-OUT_ROOT_BASE="${OUT_ROOT_BASE:-$ROOT/campaign_runs/lean_ladder_768_$(date +%F)}"
+# Output directory. A NEW run is stamped with today's date; a SKIP_PREWARM
+# recovery run instead adopts the most recent existing run directory.
+#
+# That asymmetry is deliberate. This ladder's prewarm runs for hours, so a
+# recovery is typically attempted the NEXT day -- and a plain date stamp
+# would then invent a fresh directory, find an empty mesh_cache, and
+# refuse, for no reason other than the clock. Resolving the latest
+# existing directory instead means neither path ever needs a filepath
+# passed in by hand. OUT_ROOT_BASE still overrides both, for the case of
+# several runs on disk and a specific older one to resume.
+if [[ -n "${OUT_ROOT_BASE:-}" ]]; then
+  : # caller chose explicitly; respect it
+elif [[ "${SKIP_PREWARM:-0}" == "1" ]]; then
+  # newest first; -maxdepth/-mindepth keep this to the run dirs themselves
+  OUT_ROOT_BASE=$(find "$ROOT/campaign_runs" -mindepth 1 -maxdepth 1 -type d \
+                    -name 'lean_ladder_768_*' -printf '%T@ %p\n' 2>/dev/null \
+                  | sort -rn | head -1 | cut -d' ' -f2-)
+  if [[ -z "$OUT_ROOT_BASE" ]]; then
+    echo "ERROR: SKIP_PREWARM=1 but no campaign_runs/lean_ladder_768_* dir exists." >&2
+    echo "       Nothing to resume -- run without SKIP_PREWARM to start fresh." >&2
+    exit 1
+  fi
+  echo "SKIP_PREWARM: resuming most recent run dir $OUT_ROOT_BASE"
+else
+  OUT_ROOT_BASE="$ROOT/campaign_runs/lean_ladder_768_$(date +%F)"
+fi
 OUT_ROOT_NAIVE="$OUT_ROOT_BASE/naive"
 OUT_ROOT_EQAREA="$OUT_ROOT_BASE/eqarea"
 MESH_CACHE_DIR="$OUT_ROOT_BASE/mesh_cache"
